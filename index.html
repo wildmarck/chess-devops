@@ -3,16 +3,48 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Infernal Chess DevOps</title>
+    <title>Chess Professional</title>
 </head>
 <body>
-    <div id="ui-container">
-        <div class="panel">
-            <h1>🔥 INFERNAL CHESS</h1>
-            <div id="status">Chargement...</div>
-            <button id="btn-reset">Nouvelle Partie</button>
+    <div id="bg-image"></div>
+
+    <div id="victory-screen" class="overlay" style="display: none;">
+        <div class="glass-panel victory-anim">
+            <h1> VICTOIRE </h1>
+            <h2 id="winner-name" class="accent">Joueur- x</h2>
+            <p id="win-reason">par Echec et Mat</p>
+            <button onclick="location.reload()">Rejouer</button>
         </div>
     </div>
+
+    <div id="start-screen" class="overlay">
+        <div class="glass-panel">
+            <h1>Chess <span class="accent">Pro</span></h1>
+            <div class="form-group">
+                <label>Mode de Jeu</label>
+                <select id="game-mode">
+                    <option value="pvp">Joueur vs Joueur</option>
+                    <option value="bot-medium">Contre IA (Moyen)</option>
+                    <option value="bot-hard">Contre IA (Difficile)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <input type="text" id="player-white" value="Humain" placeholder="Joueur 1">
+            </div>
+            <div class="form-group">
+                <input type="text" id="player-black" value="Ordinateur" placeholder="Joueur 2">
+            </div>
+            <button id="btn-start">Lancer la partie</button>
+        </div>
+    </div>
+
+    <div id="game-ui">
+        <div class="status-bar">
+            <div id="turn-indicator">En attente...</div>
+            <div id="check-alert" style="display:none;">ECHEC !</div>
+        </div>
+    </div>
+
     <div id="canvas-container"></div>
     <script type="module" src="/src/main.js"></script>
 </body>

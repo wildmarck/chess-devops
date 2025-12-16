@@ -1,25 +1,38 @@
-name: CD - Docker Publish
+name: CD - Docker Publish & Deploy
 
 on:
   push:
-    branches: [ main ] # Se déclenche uniquement sur la branche principale
+    branches: [ main ] # Production uniquement
 
 jobs:
-  build-and-push:
+  build-push-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
+
+      # 1. Login Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-          
+      
+      # 2. Build & Push Image
       - name: Build and Push to Docker Hub
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          # Remplace 'wildmarck' par ton vrai pseudo Docker Hub ci-dessous
           tags: wildmarckgamming/chess-inferno:latest
+
+      # 3. Déploiement Automatique sur Render (Tâche 5)
+      - name: Trigger Render Deployment
+        run: |
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+      
+      # 4. Notification Discord (Tâche 5)
+      - name: Notify Discord
+        uses: tsickert/discord-webhook@v5.3.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK }}
+          content: "🚀 **DÉPLOIEMENT RÉUSSI !**\nLe jeu d'échecs a été mis à jour sur Render.\nVersion: ${{ github.sha }}\nAuteur: ${{ github.actor }}"

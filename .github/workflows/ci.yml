@@ -17,5 +17,7 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install
+      - name: Run Linting (Bonus Tâche 6)
+        run: npm run lint
       - name: Run Tests
         run: npm run test
