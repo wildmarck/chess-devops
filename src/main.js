@@ -1,4 +1,4 @@
-import '../style.css'
+import './style.css'
 import * as THREE from 'three'
 import { Chess } from 'chess.js'
 import gsap from 'gsap'
