@@ -7,124 +7,260 @@ import gsap from 'gsap'
 const game = new Chess()
 const config = {
     playerWhite: 'Joueur 1',
-    playerBlack: 'Joueur 2',
-    mode: 'pvp',
+    playerBlack: 'Stockfish 16', 
+    mode: 'bot-hard', 
     gameStarted: false,
     aiThinking: false,
-    soundEnabled: true
+    soundEnabled: true,
+    stockfishLevel: 20,
+    // TEMPS (en secondes)
+    timeWhite: 600, // 10 minutes
+    timeBlack: 600,
+    timerInterval: null
+}
+
+// --- LOGIQUE PENDULE ---
+function startClock() {
+    if (config.timerInterval) clearInterval(config.timerInterval);
+    
+    config.timerInterval = setInterval(() => {
+        if (!config.gameStarted || game.isGameOver()) {
+            clearInterval(config.timerInterval);
+            return;
+        }
+
+        // On décrémente le joueur dont c'est le tour
+        if (game.turn() === 'w') {
+            config.timeWhite--;
+        } else {
+            config.timeBlack--;
+        }
+
+        updateClockUI();
+        checkTimeFlag();
+    }, 1000);
+}
+
+function checkTimeFlag() {
+    if (config.timeWhite <= 0 || config.timeBlack <= 0) {
+        clearInterval(config.timerInterval);
+        // On force la fin de partie
+        showVictory(config.timeWhite <= 0 ? 'b' : 'w', "au Temps");
+        config.gameStarted = false; // Bloquer le jeu
+    }
+}
+
+function formatTime(seconds) {
+    if (seconds < 0) return "00:00";
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function updateClockUI() {
+    const elWhite = document.getElementById('timer-white');
+    const elBlack = document.getElementById('timer-black');
+
+    if(elWhite) elWhite.innerText = formatTime(config.timeWhite);
+    if(elBlack) elBlack.innerText = formatTime(config.timeBlack);
+
+    // Style Actif (Vert)
+    elWhite.classList.toggle('active', game.turn() === 'w');
+    elBlack.classList.toggle('active', game.turn() === 'b');
+
+    // Style Urgence (Rouge si < 30s)
+    elWhite.classList.toggle('low', config.timeWhite < 30);
+    elBlack.classList.toggle('low', config.timeBlack < 30);
+}
+
+// --- STOCKFISH WORKER ---
+const stockfishUrl = 'https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.0/stockfish.js';
+const blob = new Blob([`importScripts('${stockfishUrl}')`], { type: 'application/javascript' });
+const stockfish = new Worker(URL.createObjectURL(blob));
+
+stockfish.onmessage = function(event) {
+    if (event.data.startsWith('bestmove')) {
+        const bestMove = event.data.split(' ')[1];
+        onStockfishMove(bestMove);
+    }
+};
+
+function initStockfish() {
+    stockfish.postMessage('uci');
+    stockfish.postMessage('isready');
+}
+initStockfish();
+
+function askStockfish() {
+    config.aiThinking = true;
+    updateUI(); // Affiche "IA réfléchit..."
+    
+    let depth = 5;
+    let skill = 0;
+    if (config.mode === 'bot-medium') { depth = 10; skill = 5; }
+    if (config.mode === 'bot-hard') { depth = 15; skill = 20; } 
+
+    stockfish.postMessage(`setoption name Skill Level value ${skill}`);
+    stockfish.postMessage(`position fen ${game.fen()}`);
+    stockfish.postMessage(`go depth ${depth}`);
+}
+
+function onStockfishMove(moveSan) {
+    if (game.isGameOver()) return;
+
+    const from = moveSan.substring(0, 2);
+    const to = moveSan.substring(2, 4);
+    const promotion = moveSan.length > 4 ? moveSan.substring(4, 5) : 'q';
+
+    const move = game.move({ from, to, promotion });
+    
+    if (move) {
+        playSound(move.captured ? 'capture' : 'move');
+        syncBoard();
+        highlightMove(move.from, move.to);
+    }
+    
+    config.aiThinking = false;
+    updateUI();
+    updateClockUI(); // Mise à jour immédiate pour changer la couleur active
 }
 
 // --- AUDIO MANAGER ---
-// Assure-toi que les fichiers existent dans /public/sounds/
-const sounds = {
-    move: new Audio('/sounds/move.mp3'),
-    capture: new Audio('/sounds/capture.mp3'),
-    check: new Audio('/sounds/check.mp3'),
-    win: new Audio('/sounds/win.mp3')
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const sounds = {};
+
+async function loadSound(name, url) {
+    try {
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        sounds[name] = audioBuffer;
+    } catch(e) { console.warn("Audio error", e); }
 }
 
+loadSound('move', '/sounds/move.mp3');
+loadSound('capture', '/sounds/capture.mp3');
+loadSound('check', '/sounds/check.mp3');
+loadSound('win', '/sounds/win.mp3');
+
 function playSound(type) {
-    if (!config.soundEnabled) return
+    if (!config.soundEnabled || !sounds[type]) return;
     try {
-        if(sounds[type]) {
-            sounds[type].currentTime = 0
-            // Correction Lint: On utilise () => {} pour ne pas avoir de variable inutilisée
-            sounds[type].play().catch(() => { /* Ignorer erreur autoplay */ })
-        }
-    } catch {
-        // Correction Lint: Bloc catch sans variable 'e' inutile
-    }
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const source = audioCtx.createBufferSource();
+        source.buffer = sounds[type];
+        source.connect(audioCtx.destination);
+        source.start(0);
+    } catch (e) { /* ignore */ }
 }
 
 // --- CHARGEMENT TEXTURES ---
 const textureLoader = new THREE.TextureLoader()
-
-// URLS SEPARÉES : Blancs (lt) vs Noirs (dt)
-const whitePieceURLs = {
-    'p': 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
-    'r': 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg',
-    'n': 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
-    'b': 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
-    'q': 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg',
-    'k': 'https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg'
+const pieceURLs = {
+    w: {
+        p: 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
+        r: 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg',
+        n: 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
+        b: 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
+        q: 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg',
+        k: 'https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg'
+    },
+    b: {
+        p: 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+        r: 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
+        n: 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
+        b: 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
+        q: 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
+        k: 'https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg'
+    }
 }
 
-const blackPieceURLs = {
-    'p': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
-    'r': 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
-    'n': 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
-    'b': 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
-    'q': 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
-    'k': 'https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg'
-}
+const textures = { w: {}, b: {} };
+['w', 'b'].forEach(c => {
+    Object.keys(pieceURLs[c]).forEach(type => {
+        textures[c][type] = textureLoader.load(pieceURLs[c][type]);
+    });
+});
 
-const whiteTextures = {}
-const blackTextures = {}
+// --- SCENE 3D ---
+const scene = new THREE.Scene();
+scene.background = null;
 
-Object.keys(whitePieceURLs).forEach(type => whiteTextures[type] = textureLoader.load(whitePieceURLs[type]))
-Object.keys(blackPieceURLs).forEach(type => blackTextures[type] = textureLoader.load(blackPieceURLs[type]))
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 9, 8); 
+camera.lookAt(0, 0, 0);
 
-// --- SCENE ---
-const scene = new THREE.Scene()
-scene.background = null 
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const container = document.getElementById('canvas-container');
+if (container) container.appendChild(renderer.domElement);
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100)
-camera.position.set(0, 9, 8) 
-camera.lookAt(0, 0, 0)
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight.position.set(5, 10, 5);
+scene.add(dirLight);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
-renderer.setSize(window.innerWidth, window.innerHeight)
-renderer.setPixelRatio(window.devicePixelRatio)
-document.getElementById('canvas-container').appendChild(renderer.domElement)
-
-// --- LUMIÈRES ---
-const ambient = new THREE.AmbientLight(0xffffff, 0.8)
-scene.add(ambient)
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.6)
-dirLight.position.set(5, 10, 5)
-scene.add(dirLight)
-
-// --- PLATEAU ---
-const boardGroup = new THREE.Group()
-const piecesMap = new Map()
-let selectedSquare = null
+// --- PLATEAU & PIÈCES ---
+const boardGroup = new THREE.Group();
+const piecesMap = new Map();
+const highlights = []; 
+let selectedSquare = null;
 
 function createBoard() {
     const border = new THREE.Mesh(
         new THREE.BoxGeometry(8.4, 0.5, 8.4),
         new THREE.MeshBasicMaterial({ color: 0x222222 })
-    )
-    border.position.y = -0.26 
-    scene.add(border)
+    );
+    border.position.y = -0.26;
+    scene.add(border);
 
     for (let x = 0; x < 8; x++) {
         for (let y = 0; y < 8; y++) {
-            const isWhite = (x + y) % 2 === 0
-            const geometry = new THREE.PlaneGeometry(1, 1)
+            const isWhite = (x + y) % 2 === 0;
+            const geometry = new THREE.PlaneGeometry(1, 1);
             const material = new THREE.MeshLambertMaterial({ 
                 color: isWhite ? 0xebecd0 : 0x739552, 
                 side: THREE.DoubleSide
-            })
-            const square = new THREE.Mesh(geometry, material)
-            square.rotation.x = -Math.PI / 2 
-            square.position.set(x - 3.5, 0, y - 3.5)
-            square.userData = { square: coordsToSquare(x, y) }
-            boardGroup.add(square)
+            });
+            const square = new THREE.Mesh(geometry, material);
+            square.rotation.x = -Math.PI / 2;
+            square.position.set(x - 3.5, 0, y - 3.5);
+            square.userData = { square: coordsToSquare(x, y) };
+            boardGroup.add(square);
         }
     }
-    scene.add(boardGroup)
+    scene.add(boardGroup);
+}
+
+function highlightMove(from, to) {
+    highlights.forEach(h => scene.remove(h));
+    highlights.length = 0;
+
+    [from, to].forEach(sq => {
+        if(!sq) return;
+        const [cx, cy] = squareToCoords(sq);
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(1, 1),
+            new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
+        );
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(cx, 0.01, cy);
+        scene.add(mesh);
+        highlights.push(mesh);
+    });
 }
 
 function syncBoard() {
-    piecesMap.forEach(mesh => scene.remove(mesh))
-    piecesMap.clear()
+    piecesMap.forEach(mesh => scene.remove(mesh));
+    piecesMap.clear();
 
-    const board = game.board()
+    const board = game.board();
     board.forEach((row, z) => {
         row.forEach((piece, x) => {
             if (piece) {
-                const geometry = new THREE.PlaneGeometry(0.85, 0.85)
-                const texture = piece.color === 'w' ? whiteTextures[piece.type] : blackTextures[piece.type]
+                const geometry = new THREE.PlaneGeometry(0.85, 0.85);
+                const texture = textures[piece.color][piece.type];
                 
                 const material = new THREE.MeshBasicMaterial({
                     map: texture,
@@ -132,215 +268,178 @@ function syncBoard() {
                     side: THREE.DoubleSide,
                     color: 0xffffff,
                     depthTest: false 
-                })
+                });
 
-                const mesh = new THREE.Mesh(geometry, material)
-                mesh.position.set(x - 3.5, 0.4, z - 3.5)
-                mesh.rotation.x = -Math.PI / 4 
-                mesh.renderOrder = 1 
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(x - 3.5, 0.4, z - 3.5);
+                mesh.rotation.x = -Math.PI / 4; 
+                mesh.renderOrder = 1;
                 
-                mesh.userData = { type: 'piece', square: coordsToSquare(x, z) }
-                scene.add(mesh)
-                piecesMap.set(coordsToSquare(x, z), mesh)
+                mesh.userData = { square: coordsToSquare(x, z) };
+                scene.add(mesh);
+                piecesMap.set(coordsToSquare(x, z), mesh);
             }
-        })
-    })
-    updateUI()
+        });
+    });
+    updateUI();
+    updateClockUI();
 }
 
-// --- LOGIQUE & SON ---
-function coordsToSquare(x, z) { return String.fromCharCode(97 + x) + (8 - z) }
+// --- HELPERS UI ---
+function coordsToSquare(x, z) { return String.fromCharCode(97 + x) + (8 - z); }
+function squareToCoords(sq) {
+    const col = sq.charCodeAt(0) - 97;
+    const row = 8 - parseInt(sq[1]);
+    return [col - 3.5, row - 3.5];
+}
 
 function updateUI() {
-    let turnText = game.turn() === 'w' ? `Trait : ${config.playerWhite}` : `Trait : ${config.playerBlack}`
-    if (config.aiThinking) turnText = "L'IA réfléchit..."
-    document.getElementById('turn-indicator').innerText = turnText
+    let turnText = game.turn() === 'w' ? `Trait : ${config.playerWhite}` : `Trait : ${config.playerBlack}`;
+    if (config.aiThinking) turnText = "🤖 Stockfish calcule...";
     
-    if(game.inCheck()) {
-        document.getElementById('check-alert').style.display = 'block'
-        if(!game.isGameOver()) playSound('check')
-    } else {
-        document.getElementById('check-alert').style.display = 'none'
-    }
-
+    const indicator = document.getElementById('turn-indicator');
+    if (indicator) indicator.innerText = turnText;
+    
+    const checkAlert = document.getElementById('check-alert');
+    if (checkAlert) checkAlert.style.display = game.inCheck() ? 'block' : 'none';
+    
+    // Si la partie est finie (Mat, Pat...)
     if(game.isGameOver()) {
-        playSound('win')
-        const modal = document.getElementById('victory-screen')
-        const winnerName = document.getElementById('winner-name')
-        const reason = document.getElementById('win-reason')
-
-        if (game.isCheckmate()) {
-            const winner = game.turn() === 'w' ? config.playerBlack : config.playerWhite
-            winnerName.innerText = winner + " a gagné !"
-            reason.innerText = "par Echec et Mat"
-            winnerName.style.color = "#ffd700"
-        } else if (game.isDraw()) {
-            winnerName.innerText = "Match Nul"
-            reason.innerText = "Pat / Répétition"
-            winnerName.style.color = "#ffffff"
-        }
-
-        modal.style.display = 'flex'
-    }
-}
-
-// IA MINIMAX
-const pieceValues = { p: 10, n: 30, b: 30, r: 50, q: 90, k: 900 }
-function evaluateBoard(fen) {
-    const tempGame = new Chess(fen)
-    const board = tempGame.board()
-    let totalEvaluation = 0
-    for (let i = 0; i < 8; i++) {
-        for (let j = 0; j < 8; j++) {
-            const piece = board[i][j]
-            if (piece) totalEvaluation += (piece.color === 'w' ? pieceValues[piece.type] : -pieceValues[piece.type])
-        }
-    }
-    return totalEvaluation
-}
-
-function minimax(gameDepth, depth, alpha, beta, isMaximizingPlayer) {
-    if (depth === 0 || gameDepth.isGameOver()) return -evaluateBoard(gameDepth.fen())
-    const moves = gameDepth.moves()
-    if (isMaximizingPlayer) {
-        let maxEval = -Infinity
-        for (let i = 0; i < moves.length; i++) {
-            gameDepth.move(moves[i])
-            const ev = minimax(gameDepth, depth - 1, alpha, beta, false)
-            gameDepth.undo()
-            maxEval = Math.max(maxEval, ev)
-            alpha = Math.max(alpha, ev)
-            if (beta <= alpha) break
-        }
-        return maxEval
-    } else {
-        let minEval = Infinity
-        for (let i = 0; i < moves.length; i++) {
-            gameDepth.move(moves[i])
-            const ev = minimax(gameDepth, depth - 1, alpha, beta, true)
-            gameDepth.undo()
-            minEval = Math.min(minEval, ev)
-            beta = Math.min(beta, ev)
-            if (beta <= alpha) break
-        }
-        return minEval
-    }
-}
-
-function triggerBotMove() {
-    if (game.isGameOver()) return
-    config.aiThinking = true
-    updateUI()
-    setTimeout(() => {
-        const depth = config.mode === 'bot-hard' ? 3 : 2
-        const moves = game.moves()
-        let bestMove = null
-        let bestValue = -Infinity
+        const winnerColor = game.turn() === 'w' ? 'b' : 'w'; // Celui qui devait jouer a perdu (sauf Pat)
+        let reason = "Inconnue";
+        if (game.isCheckmate()) reason = "par Echec et Mat";
+        else if (game.isDraw()) reason = "Nulle (Pat/Repetition)";
         
-        if (config.mode === 'bot-medium' && Math.random() < 0.3) {
-            bestMove = moves[Math.floor(Math.random() * moves.length)]
+        showVictory(game.isCheckmate() ? winnerColor : 'draw', reason);
+    }
+}
+
+// Fonction unifiée pour afficher la victoire (Mat ou Temps)
+function showVictory(winnerColor, reasonText) {
+    // Arrêter l'horloge
+    clearInterval(config.timerInterval);
+    
+    playSound('win');
+    const modal = document.getElementById('victory-screen');
+    const winnerName = document.getElementById('winner-name');
+    const reason = document.getElementById('win-reason');
+
+    if (modal) {
+        if (winnerColor === 'draw') {
+            winnerName.innerText = "MATCH NUL";
+            winnerName.style.color = "#fff";
         } else {
-            for (let i = 0; i < moves.length; i++) {
-                game.move(moves[i])
-                const boardValue = minimax(game, depth - 1, -Infinity, Infinity, false)
-                game.undo()
-                if (boardValue > bestValue) {
-                    bestValue = boardValue
-                    bestMove = moves[i]
-                }
-            }
+            const name = winnerColor === 'w' ? config.playerWhite : config.playerBlack;
+            winnerName.innerText = name + " GAGNE !";
+            winnerName.style.color = "#ffd700";
         }
-        if (!bestMove) bestMove = moves[Math.floor(Math.random() * moves.length)]
-        
-        game.move(bestMove)
-        if(bestMove.includes('x')) playSound('capture')
-        else playSound('move')
-        
-        config.aiThinking = false
-        syncBoard()
-    }, 100)
+        reason.innerText = reasonText;
+        modal.style.display = 'flex';
+    }
 }
 
 // --- INTERACTIONS ---
-const raycaster = new THREE.Raycaster()
-const mouse = new THREE.Vector2()
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
 
 window.addEventListener('click', (event) => {
     if (!config.gameStarted || config.aiThinking || game.isGameOver()) return;
     if (config.mode !== 'pvp' && game.turn() === 'b') return;
 
-    mouse.x = (event.clientX / window.innerWidth) * 2 - 1
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1
-    raycaster.setFromCamera(mouse, camera)
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
     
-    const intersects = raycaster.intersectObjects(scene.children, true)
+    const intersects = raycaster.intersectObjects(scene.children, true);
     
     if (intersects.length > 0) {
-        const hit = intersects.find(obj => obj.object.userData.square)
-        if (!hit) return
+        const hit = intersects.find(obj => obj.object.userData.square);
+        if (!hit) return;
         
-        const square = hit.object.userData.square
+        const square = hit.object.userData.square;
 
         if (!selectedSquare) {
-            const moves = game.moves({ square: square, verbose: true })
+            const moves = game.moves({ square: square, verbose: true });
             if (moves.length > 0) {
-                selectedSquare = square
-                const mesh = piecesMap.get(square)
-                if(mesh) gsap.to(mesh.position, { y: 0.6, duration: 0.1 })
+                selectedSquare = square;
+                const mesh = piecesMap.get(square);
+                if(mesh) gsap.to(mesh.position, { y: 0.6, duration: 0.15 });
             }
         } else {
             try {
-                const moveDetails = game.move({ from: selectedSquare, to: square, promotion: 'q' })
+                const moveDetails = game.move({ from: selectedSquare, to: square, promotion: 'q' });
+                
                 if (moveDetails) {
-                    if(moveDetails.captured) playSound('capture')
-                    else playSound('move')
-
-                    syncBoard()
-                    if (config.mode !== 'pvp') triggerBotMove()
+                    playSound(moveDetails.captured ? 'capture' : 'move');
+                    syncBoard();
+                    highlightMove(selectedSquare, square);
+                    
+                    if (config.mode !== 'pvp') {
+                        setTimeout(askStockfish, 500);
+                    }
                 } else {
-                    const mesh = piecesMap.get(selectedSquare)
-                    if(mesh) gsap.to(mesh.position, { y: 0.4, duration: 0.1 })
+                    const mesh = piecesMap.get(selectedSquare);
+                    if(mesh) gsap.to(mesh.position, { y: 0.4, duration: 0.15 });
                 }
             } catch {
-                // Correction Lint: Suppression de la variable 'e' inutilisée
-                const mesh = piecesMap.get(selectedSquare)
-                if(mesh) gsap.to(mesh.position, { y: 0.4, duration: 0.1 })
+                const mesh = piecesMap.get(selectedSquare);
+                if(mesh) gsap.to(mesh.position, { y: 0.4, duration: 0.15 });
             }
-            selectedSquare = null
+            selectedSquare = null;
         }
     }
-})
+});
 
-// --- START ---
+// --- BOUTON DEMARRER ---
 document.addEventListener('DOMContentLoaded', () => {
-    const btn = document.getElementById('btn-start')
-    btn.addEventListener('click', () => {
-        config.playerWhite = document.getElementById('player-white').value || "Joueur 1"
-        config.playerBlack = document.getElementById('player-black').value || "Joueur 2"
-        config.mode = document.getElementById('game-mode').value
-        
-        const overlay = document.getElementById('start-screen')
-        gsap.to(overlay, { 
-            opacity: 0, duration: 0.5, 
-            onComplete: () => {
-                overlay.style.display = 'none'
-                config.gameStarted = true
-                updateUI()
-            } 
-        })
-    })
-})
+    const startBtn = document.getElementById('btn-start');
+    if (startBtn) {
+        startBtn.addEventListener('click', () => {
+            const pWhite = document.getElementById('player-white');
+            const pBlack = document.getElementById('player-black');
+            const mode = document.getElementById('game-mode');
+            const lWhite = document.getElementById('label-white');
+            const lBlack = document.getElementById('label-black');
 
-// --- ANIMATION ---
-createBoard()
-syncBoard()
+            config.playerWhite = pWhite ? pWhite.value : "Joueur 1";
+            config.playerBlack = pBlack ? pBlack.value : "Stockfish";
+            config.mode = mode ? mode.value : 'bot-hard';
+            
+            // Mise à jour des noms sur l'interface
+            if(lWhite) lWhite.innerText = config.playerWhite;
+            if(lBlack) lBlack.innerText = config.playerBlack;
+
+            const overlay = document.getElementById('start-screen');
+            gsap.to(overlay, { 
+                opacity: 0, duration: 0.5, 
+                onComplete: () => {
+                    overlay.style.display = 'none';
+                    config.gameStarted = true;
+                    // Reset Clock
+                    config.timeWhite = 600;
+                    config.timeBlack = 600;
+                    startClock(); // Lancement du temps
+                    updateUI();
+                } 
+            });
+        });
+    }
+});
+
+// --- BOUCLE ---
+createBoard();
+syncBoard();
+
 function animate() {
-    requestAnimationFrame(animate)
-    renderer.render(scene, camera)
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
 }
-animate()
+animate();
+
 window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight
-    camera.updateProjectionMatrix()
-    renderer.setSize(window.innerWidth, window.innerHeight)
-})
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
