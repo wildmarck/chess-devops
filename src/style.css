@@ -1,0 +1,6 @@
+body { margin: 0; overflow: hidden; background: #1a0000; color: white; font-family: sans-serif; }
+#ui-container { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; }
+.panel { background: rgba(0,0,0,0.8); padding: 20px; border: 1px solid #ff4400; border-radius: 8px; pointer-events: auto; }
+h1 { margin: 0 0 10px 0; color: #ff4400; text-transform: uppercase; font-size: 1.5rem; }
+button { background: #ff4400; border: none; color: white; padding: 10px 20px; cursor: pointer; font-weight: bold; width: 100%; }
+button:hover { background: #ff6600; }
