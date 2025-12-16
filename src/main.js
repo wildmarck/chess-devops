@@ -22,17 +22,21 @@ const sounds = {
     check: new Audio('/sounds/check.mp3'),
     win: new Audio('/sounds/win.mp3')
 }
+
 function playSound(type) {
     if (!config.soundEnabled) return
     try {
         if(sounds[type]) {
             sounds[type].currentTime = 0
-            sounds[type].play().catch(e => {})
+            // Correction Lint: On utilise () => {} pour ne pas avoir de variable inutilisée
+            sounds[type].play().catch(() => { /* Ignorer erreur autoplay */ })
         }
-    } catch(e) {}
+    } catch {
+        // Correction Lint: Bloc catch sans variable 'e' inutile
+    }
 }
 
-// --- CHARGEMENT TEXTURES (CORRECTION COULEURS) ---
+// --- CHARGEMENT TEXTURES ---
 const textureLoader = new THREE.TextureLoader()
 
 // URLS SEPARÉES : Blancs (lt) vs Noirs (dt)
@@ -74,7 +78,7 @@ renderer.setPixelRatio(window.devicePixelRatio)
 document.getElementById('canvas-container').appendChild(renderer.domElement)
 
 // --- LUMIÈRES ---
-const ambient = new THREE.AmbientLight(0xffffff, 0.8) // Plus lumineux pour bien voir le noir
+const ambient = new THREE.AmbientLight(0xffffff, 0.8)
 scene.add(ambient)
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.6)
 dirLight.position.set(5, 10, 5)
@@ -120,15 +124,13 @@ function syncBoard() {
         row.forEach((piece, x) => {
             if (piece) {
                 const geometry = new THREE.PlaneGeometry(0.85, 0.85)
-                
-                // CHOIX DE LA BONNE TEXTURE (BLANC OU NOIR)
                 const texture = piece.color === 'w' ? whiteTextures[piece.type] : blackTextures[piece.type]
                 
                 const material = new THREE.MeshBasicMaterial({
                     map: texture,
                     transparent: true,
                     side: THREE.DoubleSide,
-                    color: 0xffffff, // On laisse la couleur naturelle de l'image SVG
+                    color: 0xffffff,
                     depthTest: false 
                 })
 
@@ -154,7 +156,6 @@ function updateUI() {
     if (config.aiThinking) turnText = "L'IA réfléchit..."
     document.getElementById('turn-indicator').innerText = turnText
     
-    // Check
     if(game.inCheck()) {
         document.getElementById('check-alert').style.display = 'block'
         if(!game.isGameOver()) playSound('check')
@@ -162,7 +163,6 @@ function updateUI() {
         document.getElementById('check-alert').style.display = 'none'
     }
 
-    // VICTOIRE (Glassmorphism Modal)
     if(game.isGameOver()) {
         playSound('win')
         const modal = document.getElementById('victory-screen')
@@ -170,7 +170,6 @@ function updateUI() {
         const reason = document.getElementById('win-reason')
 
         if (game.isCheckmate()) {
-            // Le tour est inversé car c'est celui qui vient de jouer qui a gagné
             const winner = game.turn() === 'w' ? config.playerBlack : config.playerWhite
             winnerName.innerText = winner + " a gagné !"
             reason.innerText = "par Echec et Mat"
@@ -181,11 +180,11 @@ function updateUI() {
             winnerName.style.color = "#ffffff"
         }
 
-        modal.style.display = 'flex' // Affiche le modal
+        modal.style.display = 'flex'
     }
 }
 
-// IA MINIMAX (Gardée identique mais propre)
+// IA MINIMAX
 const pieceValues = { p: 10, n: 30, b: 30, r: 50, q: 90, k: 900 }
 function evaluateBoard(fen) {
     const tempGame = new Chess(fen)
@@ -253,7 +252,6 @@ function triggerBotMove() {
         }
         if (!bestMove) bestMove = moves[Math.floor(Math.random() * moves.length)]
         
-        // Jouer le coup
         game.move(bestMove)
         if(bestMove.includes('x')) playSound('capture')
         else playSound('move')
@@ -292,10 +290,8 @@ window.addEventListener('click', (event) => {
             }
         } else {
             try {
-                // On vérifie si c'est une capture avant de jouer le coup pour le son
                 const moveDetails = game.move({ from: selectedSquare, to: square, promotion: 'q' })
                 if (moveDetails) {
-                    // SON
                     if(moveDetails.captured) playSound('capture')
                     else playSound('move')
 
@@ -305,7 +301,8 @@ window.addEventListener('click', (event) => {
                     const mesh = piecesMap.get(selectedSquare)
                     if(mesh) gsap.to(mesh.position, { y: 0.4, duration: 0.1 })
                 }
-            } catch (e) {
+            } catch {
+                // Correction Lint: Suppression de la variable 'e' inutilisée
                 const mesh = piecesMap.get(selectedSquare)
                 if(mesh) gsap.to(mesh.position, { y: 0.4, duration: 0.1 })
             }
