@@ -1,4 +1,4 @@
-import './style.css'
+import '../style.css'
 import * as THREE from 'three'
 import { Chess } from 'chess.js'
 import gsap from 'gsap'
@@ -44,9 +44,8 @@ function startClock() {
 function checkTimeFlag() {
     if (config.timeWhite <= 0 || config.timeBlack <= 0) {
         clearInterval(config.timerInterval);
-        // On force la fin de partie
         showVictory(config.timeWhite <= 0 ? 'b' : 'w', "au Temps");
-        config.gameStarted = false; // Bloquer le jeu
+        config.gameStarted = false;
     }
 }
 
@@ -64,13 +63,11 @@ function updateClockUI() {
     if(elWhite) elWhite.innerText = formatTime(config.timeWhite);
     if(elBlack) elBlack.innerText = formatTime(config.timeBlack);
 
-    // Style Actif (Vert)
-    elWhite.classList.toggle('active', game.turn() === 'w');
-    elBlack.classList.toggle('active', game.turn() === 'b');
+    if(elWhite) elWhite.classList.toggle('active', game.turn() === 'w');
+    if(elBlack) elBlack.classList.toggle('active', game.turn() === 'b');
 
-    // Style Urgence (Rouge si < 30s)
-    elWhite.classList.toggle('low', config.timeWhite < 30);
-    elBlack.classList.toggle('low', config.timeBlack < 30);
+    if(elWhite) elWhite.classList.toggle('low', config.timeWhite < 30);
+    if(elBlack) elBlack.classList.toggle('low', config.timeBlack < 30);
 }
 
 // --- STOCKFISH WORKER ---
@@ -93,7 +90,7 @@ initStockfish();
 
 function askStockfish() {
     config.aiThinking = true;
-    updateUI(); // Affiche "IA réfléchit..."
+    updateUI(); 
     
     let depth = 5;
     let skill = 0;
@@ -122,7 +119,7 @@ function onStockfishMove(moveSan) {
     
     config.aiThinking = false;
     updateUI();
-    updateClockUI(); // Mise à jour immédiate pour changer la couleur active
+    updateClockUI();
 }
 
 // --- AUDIO MANAGER ---
@@ -135,7 +132,10 @@ async function loadSound(name, url) {
         const arrayBuffer = await response.arrayBuffer();
         const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
         sounds[name] = audioBuffer;
-    } catch(e) { console.warn("Audio error", e); }
+    } catch { 
+        // Correction ESLint : plus de 'e' ici
+        console.warn(`Erreur chargement son: ${name}`); 
+    }
 }
 
 loadSound('move', '/sounds/move.mp3');
@@ -151,7 +151,9 @@ function playSound(type) {
         source.buffer = sounds[type];
         source.connect(audioCtx.destination);
         source.start(0);
-    } catch (e) { /* ignore */ }
+    } catch { 
+        // Correction ESLint : on enlève (e) car on ne l'utilise pas
+    }
 }
 
 // --- CHARGEMENT TEXTURES ---
@@ -303,9 +305,8 @@ function updateUI() {
     const checkAlert = document.getElementById('check-alert');
     if (checkAlert) checkAlert.style.display = game.inCheck() ? 'block' : 'none';
     
-    // Si la partie est finie (Mat, Pat...)
     if(game.isGameOver()) {
-        const winnerColor = game.turn() === 'w' ? 'b' : 'w'; // Celui qui devait jouer a perdu (sauf Pat)
+        const winnerColor = game.turn() === 'w' ? 'b' : 'w';
         let reason = "Inconnue";
         if (game.isCheckmate()) reason = "par Echec et Mat";
         else if (game.isDraw()) reason = "Nulle (Pat/Repetition)";
@@ -314,11 +315,8 @@ function updateUI() {
     }
 }
 
-// Fonction unifiée pour afficher la victoire (Mat ou Temps)
 function showVictory(winnerColor, reasonText) {
-    // Arrêter l'horloge
     clearInterval(config.timerInterval);
-    
     playSound('win');
     const modal = document.getElementById('victory-screen');
     const winnerName = document.getElementById('winner-name');
@@ -407,7 +405,6 @@ document.addEventListener('DOMContentLoaded', () => {
             config.playerBlack = pBlack ? pBlack.value : "Stockfish";
             config.mode = mode ? mode.value : 'bot-hard';
             
-            // Mise à jour des noms sur l'interface
             if(lWhite) lWhite.innerText = config.playerWhite;
             if(lBlack) lBlack.innerText = config.playerBlack;
 
@@ -417,10 +414,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 onComplete: () => {
                     overlay.style.display = 'none';
                     config.gameStarted = true;
-                    // Reset Clock
                     config.timeWhite = 600;
                     config.timeBlack = 600;
-                    startClock(); // Lancement du temps
+                    startClock();
                     updateUI();
                 } 
             });
